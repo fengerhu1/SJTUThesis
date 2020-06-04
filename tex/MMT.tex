@@ -1,4 +1,4 @@
-\chapter{可挂载完整性保护树：Mountable merkle tree}
+\chapter{可挂载完整性保护树：Mountable Merkle Tree}
 \pkg{siunitx}
 \pkg{ntheorem}
 \pkg{amsthm}
@@ -24,7 +24,7 @@
 的一种简单的实现，是保护更多的哈希树的根节点，然后正如我们之前所提的，验证者不希望保护大量的数据，对比于完整性保护中，即内存控制器（memory controller）中的空间有限，只能保存少量的哈希值活着计数值
 所以如果仅是简单保护更多的哈希树根节点，显然没有办法达到期望的具有可扩展性的内存保护，因为保护的内存大小收到内存控制器中能够保存的根节点数量的限制。为了实现可扩展的内存保护，我们提出了两个新的概念：子树和根数。
 我们认为整个哈希森林由子树和根树组成。子树即哈希森林中所有的可以动态加入或者移除的哈希树，一颗颗子树构成了哈希森林；根数则保护哈希森林的完整性。所以我们只需要把根数的根节点：root-of-root保护在内存控制器中即可，而不需要保护所有的子树根节点。
-因为内存控制器中的空间有限，我们无法将所有的子树节点放在内存控制器中，相反我们把所有的子树的节点以及根节点保存在内存中，我们将所有子树的根节点放在一块特殊的内存空间中：MMT-metadata zone（之后会详细介绍）内存中的空间被认为是充足的，我们可以存储足够多的子树。当然在内存控制器中仅仅只放根数的根节点是不够，这样会退化成为之前的完整性保护方案，即仍然只存在一棵树。为了讲哈希森林结合到内存
+因为内存控制器中的空间有限，我们无法将所有的子树节点放在内存控制器中，相反我们把所有的子树的节点以及根节点保存在内存中，我们将所有子树的根节点放在一块特殊的内存空间中：MMT元数据区域（之后会详细介绍）内存中的空间被认为是充足的，我们可以存储足够多的子树。当然在内存控制器中仅仅只放根数的根节点是不够，这样会退化成为之前的完整性保护方案，即仍然只存在一棵树。为了讲哈希森林结合到内存
 控制器中，我们首先对内存的访问做了调研。我们发现，CPU对内存的访问具有一定的局域性，即在一段时间内，CPU可能访问某一部分的内存数据，而不会随机的访问整个内存空间。这个观察结果已经广泛的使用在了计算机体系结构中，比如cache的提出就是为了缓解CPU频繁的访问
 内存中的数据，既然内存中的数据可以通过cache的提升性能，那么我们也可以采用同样的方式缓存子树的根节点。我们首先将所有的子树的分为三类：一、活跃的子树，即CPU正在访问该子树保护的内存数据或者刚刚访问了该子树保护的数据；二、不活跃的子树，该子树对应的内存数据
 需要被保护，但是当前或者近段时间内，该内存数据没有被CPU访问；三、是未分配的子树，未分配的子树表示内存的数据不需要经过保护。首先活跃的与不活跃的子树的节点都需要在内存中有备份，如果该子树是活跃的，那么我们将该子树的根节点缓存在内存控制器中，CPU可以直接在内存控制器
@@ -35,7 +35,14 @@
 内存控制器是控制对内存的访问，内存控制器是SoC上的一个单元，CPU中的访存指令在cache中如果没有命中，或者cache中发生了cache miss等事件，需要从内存中读取或者写入数据的时候，就会向内存控制器中发送一个包的请求。内存控制器解析包请求，然后通过总线将需要读取或者写入的数据的物理地址（数据）以包的形式发给DIMM，
 DIMM中的控制器相应请求，写入或者返回对应物理地址上的数据。在一个CPU上可以拥有多个内存控制器单元，每一个内存控制器通过总线控制一个DIMM，通过多个内存控制器，能够实现并发的内存操作，CPU会协调不同的内存控制器，使其能够高效协同工作。为了在访问内存的时候保证内存数据的完整性，我们需要在
 内存控制器中做一定的修改。传统的完整性保护架构中，只需要在硬件中实现对完整性保护树的索引，取值，更新与哈希计算，在MMT中因为引入了哈希森林，所以还要加上对子树的管理，分配等其他功能。在MMT的内存控制器中我们增加了三个组件：1、安全比特表(Secure Bitmap)；2、
-子树缓存（Mount table）；3、根树根节点哈西/计数（Root-of-root）。
+子树缓存（Mount table）；3、根树根节点哈希/计数（Root-of-root），如图~\ref{fig:MMT-arch.png}所示。
+\begin{figure}[!htp]
+    \centering
+    \includegraphics[scale=0.7]{MMT-arch.png}
+    \caption{\textbf{MMT中内存控制器与内存布局}。\emph{Secure Bitmap}记录了当前已经分配的子树，\emph{Mount Table}记录当前活跃的子树根节点，\emph{Root-of-root}根树的根节点(可信基)。内存布局：
+    \emph{Non-secure Mem}非安全内存，\emph{Secure Mem}安全内存，\emph{Subtree Node}子树节点，\emph{MMT metadata zone} MMT元数据区域}
+   \label{fig:MMT-arch.png}
+\end{figure}
 
 \textbf{安全比特表：Secure Bitmap}
 安全比特表用于记录那些子树已经分配了，在之后的章节中我们会详细的介绍内存中的布局。安全比特表用一个比特来代表其对应的子树是否被分配，活跃的子树以及不活跃的子树都是已经分配的子树，而未分配的子树是不活跃的子树。安全比特表的开销取决总内存的大小以及
@@ -61,25 +68,32 @@ Root-of-root是根数的根节点的哈希/计数值，不同于子树缓存：M
 
 内存控制器中新增加三个部件：Secure Bitmap；Mount Table；Root-of-root，同时在内存控制器中还需增加完整性保护的逻辑以及挂载子树的功能，这些将在之后的章节中详细的介绍。
 
+\begin{figure}[!htp]
+  %  \setlength{\abovecaptionskip}{-5pt}
+    \centering
+    \includegraphics[scale=1]{fig/design-hw-mountable-tree.eps}
+    \caption{\textbf{哈希森林}}
+    \label{fig:hash-forest}
+    %, and the common root ancestor (the topmost node) is fixed in the SoC.
+  \end{figure}
 \section{完整性保护树的动态原语}
 之前所有的工作中，完整性保护树都是静态的，不同于其他的树的组织结构，因为可以动态的增加一个分支，或者合并两个分支。完整性保护树不能够更改树的组织结构，因为内存控制器需要在获得内存地址的时候就知道其对应的每一层节点的在内存中具体位置，静态的树的组织结构能够不改变
 树中的每一层的结构以及对应所在的位置中，所以树中节点的位置在初始化的时候就能够确定了，方便内存控制器之后的读取与验证。静态的树在实现的时候虽然很简单，但是存在诸多弊端，比如只能够保护连续的内存空间，没有办法动态的更新保护的内存范围。所以我们希望给静态的完整性保护树
 附上一些动态操作的原语，能够实现动态的内存你保护，同时让内存控制器能够快速的知道树中每个节点在内存中的位置。结合在上诉的活跃子树与不活跃子树的描述与分析，我们为Mountable merkle tree和哈希森林提出四个动态操作原语：挂载（Mount），卸载（Unmount），添加（add）和移除（remove）。
-通过这四个原语，我们可以加子树在活跃，不活跃与未分配三种状态间转换。挂载（Mount）与卸载（Unmount）分别对应将子树的状态从活跃转换为不活跃以及从不活跃转换为活跃。挂载与卸载的想法类似与在操作系统中的文件系统中的挂载文件到文件树中。在Mountable merkle tree中，我们可以将
+通过这四个原语，我们可以加子树在活跃，不活跃与未分配三种状态间转换。如图~\ref{fig:hash-forest}所示，挂载（Mount）与卸载（Unmount）分别对应将子树的状态从活跃转换为不活跃以及从不活跃转换为活跃。挂载与卸载的想法类似与在操作系统中的文件系统中的挂载文件到文件树中。在Mountable merkle tree中，我们可以将
 一颗子树挂载到Mount Table中，在Mount Table中的子树的根节点以及子树的地址，能够被内存控制器直接读到，从而进行完整性保护的计算。而卸载的操作可以将一个挂载在Mount Table中的子树卸载到内存中，这样可以奖Mount Table中的空间留给其他的活跃的子树使用。
 添加与移除是针对分配与未分配子树而言的。添加操作是将子树添加在哈希森林中，同时奖secure bitmap中对应的子树的比特为设置成为1，一颗子树添加到哈希森林中并不意味着他是活跃，而是处于不活跃的状态。同样我们也可以使用移除（remove）操作将一颗子树从哈希森林中移除，这个操作
 意味的该子树对应的内存不需要经过完整性保护。通过这四个完整性保护树的动态操作原语。我们可以实现动态的增加需要保护的内存，把活跃的子树挂载到Mount  Table中来减少运行时候的开销。同时在添加一颗子树到哈希森林中的时候，我们需要指定该子树在内存中的位置，并且和子树初始化的哈希/计数值
-保存在内存中的一块特殊的区域MMT metatdata zone中，之后在挂载的时候，会将该子树的地址写入Mount Table中，这样内存控制器就可以知道该子树的其他节点在内存中的位置，不依赖与任何运行时的信息。
+保存在内存中的一块特殊的区域：MMT元数据区域中，之后在挂载的时候，会将该子树的地址写入Mount Table中，这样内存控制器就可以知道该子树的其他节点在内存中的位置，不依赖与任何运行时的信息。
 
 \section{内存布局}
-为了适应动态可扩展的内存完整性保护，我们对内存中的布局做了进一步的细分。内存中的居于被分为四个部分，分别是：非安全内存，安全内存，子树节点区域以及MMT元数据区域。其中非安全内存不需要经过完整性验证，其对应的子树属于未分配的状态；安全内存是指该内存受完整性保护，它对应的子树处于已分配
+如图~\ref{fig:MMT-arch.png}所示，为了适应动态可扩展的内存完整性保护，我们对内存中的布局做了进一步的细分。内存中的居于被分为四个部分，分别是：非安全内存，安全内存，子树节点区域以及MMT元数据区域。其中非安全内存不需要经过完整性验证，其对应的子树属于未分配的状态；安全内存是指该内存受完整性保护，它对应的子树处于已分配
 状态，但是不能保证子树一定处在活跃的状态；子树节点区域中存放着子树的中间节点，子树的根节点存在内存控制器中，但是因为内存中的空间是有限，不可能存下子树中的所有的节点，所以子树中的中间节点需要存放在内存中。子树节点区域可以动态的分配，往往实在动态添加安全内存的时候随之一起指定对应的子树
 节点区域。安全内存以及子树节点区域可以离散的分布在内存中，不一定需要时连续的内存区间。MMT元素据区域（MMT metadata zone）是一块特殊的区域，该区域只能由拥有特权级的程序访问以及修改，MMR元素剧区域中存储着所有的子树的根节点（包括了未分配即已分配的子树），根节点中包括了对应子树的哈希/计数值
 以及子树的在内存中地址，如果当前的子树没有分配，那么子树的根节点中的哈希以及地址为空。MMT元素据区域中的另一部分时根数的节点。根数用来保护MMT元素据区域中所有子树的根节点的完整性。如果恶意的攻击者通过物理攻击方式修改MMT元素据区域中的数据将会被根数的检查发现，如果攻击者通过软件攻击的方式
 修改MMT元素据区域中的值将会被禁止，只有特权程序才能访问该区域，其他程序想要修改将会被禁止。下面我们将具体的介绍一下在RISCV架构中如何保护MMT元素据区域的
 
-\subsection{监视者：Monitor}
-在RISCV的指令集架构中分为四个特权级，分别时用户态（U mode），内核态（S mode），虚拟化层（H mode），监视器层（M mode）。其中U mode中运行着一般的用户程序，S mode中运行着操作系统，H mode中运行着虚拟机管理者（VMM），M mode中运行的监视器。其中M mode拥有最高的特权级。M mode可以访问所有的物理资源
+\textbf{监视者(Monitor): }在RISCV的指令集架构中分为四个特权级，分别时用户态（U mode），内核态（S mode），虚拟化层（H mode），监视器层（M mode）。其中U mode中运行着一般的用户程序，S mode中运行着操作系统，H mode中运行着虚拟机管理者（VMM），M mode中运行的监视器。其中M mode拥有最高的特权级。M mode可以访问所有的物理资源
 以及拥有自己的特权指令。M mode中的代码非常少，一般情况下会把对物理资源的管理交给更低权限的程序例如运行在S mode中内核程序，或者运行在H mode中的VMM。正常的M mode中值运行了启动机器的bootloader用于加载代码，以及少量的初实话工作。当然我们可以在M mode中加入一个监视着（monitor）来监管部分物理资源或者
 对其作检查，来提高系统的安全性。在RISCV的指令集架构中，存在着一些特殊的寄存器：pmp。pmp寄存器时成对出现的，包括一个pmp地址寄存器以及一个pmp配置寄存，通过这两个寄存器，可以划初内存中的一块连续的内存区域，同时给该内存区域设置上访问的权限，在RISCV指令集中pmp寄存一般由16个，既可以划分出16个连续独立的内存区域。我们利用M mode中的监视器以及pmp寄存器来保护MMT 元素据区域。
 首先我们选定一个pmp寄存器，然后给它分配一块物理内存作为MMT元素据区域。并且给该内存设置的访问修改的权限为M mode，即只有处在M mode中的程序才能够访问MMT 元素据区域中的信息。其他的特权级的程序如果访问该内存区域将会下陷到M mode中进行处理。通过这样的机制能够保证只有M mode中改的监视者能够修改MMT 元素据区域中的数据
@@ -97,32 +111,50 @@ Root-of-root是根数的根节点的哈希/计数值，不同于子树缓存：M
 \end{enumerate}
 以上的步骤是MMT中为了自动实现挂载以及卸载操作所增加的内存完整性检查流程。下面会具体阐述如果通过Mountable merkle tree进行完整性检查，这个部分在上述步骤中的三四五中使用到，首先我们会具体介绍Mountable merkle tree中节点的组织结构。
 
-\subsection{树节点结构：三级计数}
+\subsection{树节点结构：三级counter}
 下面我们会详细的介绍Mountable merkle tree中节点的组织形式。一个节点的大小为512比特，符合一条缓存行的大小，这一点是为了方便能够把整个节点缓存在系统的cache中减少读内存的操作。一个树节点的512bit被分成了五个部分，分别是：global counter，extra counter，index，local counter以及hash。首先将介绍global conuter以及local counter的作用。
-首先，为了提高节点中的扇出，我们用counter替代了hash，这个做法在BMT中得到的使用，用counter代替hash能够很好兼顾加密以及完整性的保护，我为了减少受到replay攻击的可能，每一次对内存的写访问都会增加对应的counter的值。采用global counter和local counter的方式是在VAULT中首次提出在完整性保护中的。local counter决定了一个树节点的扇出的度数，二global counter决定了一个每一个counter的大小，是防止replay攻击的关键
-每一个counter是由local counter和global counter拼接而成，所有的local counter公用一个glocal counter，所以导致了一旦local counter耗尽了就需要增加global counter导致了节点中的所有的counter的数值都发生了变化，从而使得所有被counter保护的子节点都需要做rehash。这个操作将带来一定的开销，所以我们尝试减缓这个问题。跟提出Mountable merkle tree的想法
-类似我们发现，在完整性保护树中，也存在一定的局域性，树中的节点被分成了热节点以及冷节点，其中热节点是快速增长的counter节点，冷节点是慢速增长的counter节点，因为树的组织形式，一个父节点将会对应多个子节点，即父节点保护的内存范围比子节点要大，在树的顶部的节点中，往往只会存在一个活跃的节点，又因为树中顶部的节点被访问的概率远超过
-底部的节点，所以counter会快速的增长，更加容易发生overflow，所以我们区分对待同一个树节点中的不同的counter。在一个树节点中可能存在一个或者少数几个快速增长的counter节点，剩下的counter的节点是不活跃的节点，增长的速率比较慢，根据以上的观察，我们除了将counter分成global counter和local counter之外，
-我们还加入了extra counter，作为对热counter节点的补充，我们映引入了extra counter以及index，index表示了当前的热counter节点是哪一个。如果一个counter节点是热节点，那么会使用extra counter中的值作为补充，如果当前的counter是冷节点，那么默认的extra counter为0。在三层counter的结构下，当local counter发生了overflow，首先回去检查该树
-节点中是否还存在空闲的extra counter可以使用，如果存在那么将index设置为对应的counter，然后将extra counter加一。如果当前的树节点中没有空闲的extra counter可以使用，我们将global counter加一，然后对所有的子节点进行rehash的计算，然后将index设置为发生overflow的counter节点。
-如果extra counter发生了overflow，那么也需要将global counter 加一，然后对所有的子节点进行rehash。所以在三层counter的情况下，rehash可能发生在两种情况下，第一是没有空闲的extra counter了；第二：extra counter发生了overflow。虽然发生rehash的情况变得复杂了
-但是应为加入了extra counter，可以充分利用counter的不均衡性，进一步减少local counter中大小，增加树节点的扇出，保护更多的内存。在MMT中树节点的扇出分别为：64，32，32，...，因为越往上的节点中的counter越容易被访问到，所以对应的扇出会减少，但是由于加入了extra counter，local counter
-的大小能够比VAULT更小（VAULT中树节点的扇出分别是64，32，24），相同层数下树的扇出更多，同时能够保护得内存也更大。值得注意的是，index和extra counter的个数可以为多个，在扇出为32的情况下，local counter为11 bit global counter为64 bit。index为5 bit，extra counter为11 bit（两个extra counter和index）
-以及hash占用64bit，这五个部分相加刚好等于一条缓存行的大小512 bit。
+首先，为了提高节点中的扇出，我们用counter替代了hash，这个做法在BMT中得到的使用，用counter代替hash能够很好兼顾加密以及完整性的保护，我为了减少受到replay攻击的可能，每一次对内存的写访问都会增加对应的counter的值。采用global counter和local counter的方式是在VAULT中首次提出在完整性保护中的。local counter决定了一颗树节点的扇出的度数，而global counter决定了counter的大小（counter的大小是防止重放攻击的关键）。
+每一个树节点的counter是由local counter和global counter拼接而成，所有的local counter公用一个glocal counter，一旦local counter耗尽了，需要增加global counter数值时，就会使所有节点中的counter的数值均发生了变化，进而所有被counter保护的子节点都需要重新计算对应的哈希。重新计算哈希将带来不可忽略的开销，所以我们尝试优化树节点中的数据结构来缓减这部分的性能开销。
 
-除了三层counter的设计，我们对节点的哈希计算采用了已有的方式，我们父节点中对应的counter数值和子节点中的所有counter用PMAC算法哈希的计算（初始化的时候会随机生成用于PMAC计算的密钥），将得到的哈希值放在子节点中最后64 bit中。当发生一次写请求的时候，需要更新对应的counter数值，节点的哈希值会进行重计算，当发生一次
-读请求的时候，内存控制器会验证每一层树节点中的哈希值和计算出来的哈希值是否匹配，如果匹配才允许内存的访问。以上的步骤保证了MMT中的counter的完整性。对于任意一个内存块，有对应的counter和mac，其中counter受MMT中节点中的哈希保护，而内存中的数据
-受到counter以及对应的mac保护。值得注意的是，对于counter和mac我们只需要保证其中一个的完整性，就能够保证内存块中的数据的完整性。下面我们将介绍PMAC的算法：
+\begin{figure}[!htp]
+  \centering
+  \includegraphics[scale=1]{fig/design-hw-mountable-tree-layout.eps}
+  \caption{\textbf{MMT树节点数据结构：}三级counter}
+ \label{fig:three-level-count.png}
+\end{figure}
+
+同Mountable merkle tree的想法类似，我们发现，在完整性保护树中，也存在一定的局域性，树中的节点被分成了热节点以及冷节点，其中热节点是快速增长的counter节点，冷节点是慢速增长的counter节点，因为树的组织形式，一个父节点将会对应多个子节点，即父节点保护的内存范围比子节点要大，在树的顶部的节点中，往往只会存在一个活跃的节点，又因为树中顶部的节点被访问的概率远超过
+底部的节点，所以counter会快速的增长，更加容易发生overflow，所以我们区分对待同一个树节点中的不同的counter。在一个树节点中可能存在一个或者少数几个快速增长的counter节点，剩下的counter的节点是不活跃的节点，增长的速率比较慢，根据以上的观察，我们除了将counter分成global counter和local counter之外，
+我们还加入了\emph{extra counter}，作为对热counter节点的补充。如图~\ref{fig:three-level-count.png}所示，我们在树节点中引入两个新的结构：\textbf{extra counter}以及\textbf{index}，其中index表示了当前的热counter节点是哪一个。如果一个counter节点是热节点，那么会使用extra counter中的值作为补充，如果当前的counter是冷节点，那么默认的extra counter为0。在三层counter的结构下，当local counter发生了overflow，首先回去检查该树
+节点中是否还存在空闲的extra counter可以使用，如果存在那么将index设置为对应的counter，然后将extra counter加一。如果当前的树节点中没有空闲的extra counter可以使用，我们将global counter加一，然后对所有的子节点重新计算哈希值，并将index设置为发生overflow的counter节点。
+如果extra counter发生了overflow，那么也需要将global counter 加一，然后对所有的子节点重新计算哈希。所以在三层counter的情况下，哈希的重计算可能发生在两种情况下：
+\begin{enumerate}
+  \item 没有空闲的extra counter了
+  \item extra counter发生了overflow
+\end{enumerate}
+虽然发生重新计算子节点哈希的情况变得复杂了，但是因为加入了extra counter，可以充分利用counter的不均衡性，进一步减少local counter的大小，增加树节点的扇出，保护更多的内存。在MMT中树节点的扇出分别为：64，32，32，...，因为越往上的节点中的counter越容易被访问到，所以对应的扇出会减少，但是由于加入了extra counter，local counter
+的大小能够比VAULT更小（VAULT中树节点的扇出分别是64，32，24），相同层数下树的扇出更多，同时能够保护得内存也更大。值得注意的是，index和extra counter的个数可以为多个。在扇出为32的树节点中：local counter为$11$ bit，global counter为$64$ bit，index为$2\times5$ bit，extra counter为$2\times11$ bit（在该配置下存在两个index和两个extra counter）
+以及hash占用$64$ bit，这五个部分相加刚好等于一条缓存行的大小$512$ bit。
+
+除了三层counter的设计，我们对节点的哈希计算采用了已有的方式，我们对父节点中对应的counter数值和子节点中的所有counter用PMAC算法进行哈希的计算（初始化的时候会随机生成用于PMAC计算的密钥），将得到的哈希值放在子节点中最后64 bit中。当发生一次写请求的时候，需要更新对应的counter数值，节点的哈希值会进行重计算，当发生一次
+读请求的时候，内存控制器会验证每一层树节点中的哈希值和计算出来的哈希值是否匹配，如果匹配才允许内存的访问。以上的步骤保证了MMT中的counter的完整性。对于任意一个内存数据块，有对应的counter和MAC，其中counter受MMT中节点中的哈希保护，而内存中的数据
+受到counter以及对应的MAC保护。值得注意的是，对于counter和MAC我们只需要保证其中一个的完整性，就能够保证内存块中的数据的完整性。下面我们将介绍PMAC的算法：
 
 \subsection{PMAC}
 PMAC全称Parallel Message Authentication Code，是一种高效的验证数据完整的算法，它能够以对数据块进行并发的验证，在介绍PMAC之前我们将介绍AES加密算法。
 
-\textbf{AES加密}, AES加密算法是一种高效的加密算法，器核心使用了异或操作，使得加密的过程能够在一个cycle内完成。AES加密的核心公式是:密文=明文$\oplus$ pad，其中pad是加密时候的因子（CTR），每一次加密的pad应该保持不同，应为攻击者可以通过明文和密文快速的得到pad的值（异或具有可逆性）。一般在生成pad的时候往往考虑计入一些时空因素，
+\textbf{AES加密}, AES加密算法是一种高效的加密算法，器核心使用了异或操作，使得加密的过程能够在一个cycle内完成。AES加密的核心公式是:密文=明文$\oplus$ pad，其中pad由因子（CTR）加密后生成，每一次加密的pad应该保持不同，因为攻击者可以通过明文和密文快速的得到pad的值（异或具有可逆性）。一般在生成pad的时候往往考虑计入一些时空因素，
 比如在完整性保护中，pad是由key，counter以及对应的内存地址通过AES128等算法生成的，其中counter和地址作为CTR。因为每一次的读写都会得counter加1，对应不同内存操作其对应的内存地址也不一样，所以不可能同时存在两个相同的pad，除非counter耗尽。我们得到pad之后，将明文和pad做一次异或的操作就能够得到对应的密文。异或操作在cpu中只需要一个cycle既可以完成，所以AES加密运算
 是一种高效的单次加密方式。（这里所说的AES加密不等价与AES128等算法，AES128是用于生成pad的算法，生成pad之后还需要和明文做一次异或得到密文）
+\begin{figure}[!htp]
+  \centering
+  \includegraphics[scale=0.6]{PMAC.png}
+  \caption{\textbf{PMAC：}并行计算数据块MAC}
+ \label{fig:PMAC.png}
+\end{figure}
 
-在PMAC中，会将数据块划分成为等长M块，其中的每一块数据的长度都是，e.g., 128 bit，同时PMAC还生成key1， key2用于AES加密计算。对分割好的M块数据分别用AES(key1)做加密，将加密后得到的M块密文块通过异或的方式生成$\Sigma$。
-最后用AES(key2，CTR)得到对应的pad（其中CTR为内存的counter和地址），然后对之前得到的$\Sigma$做异或运算，异或后的结果就是PMAC最终得到的结果。在PMAC的整个过程中，可以对分割好的M块数据同时进行AES加密，相较于CMAC, HMAC这类串行的MAC来说非常的高效，并且AES加密计算本身非常高效，所以PMAC被认为是一种高效的计算MAC函数。
+如图~\ref{fig:PMAC.png}所示，在PMAC中，会将数据块划分成为等长M块，其中的每一块数据的长度都是，e.g., 128 bit，同时PMAC还生成key1， key2用于AES加密计算。对分割好的M块数据分别用AES(key1)做加密，将加密后得到的M块密文块通过异或的方式生成$\Sigma$。
+最后用AES(key2，CTR)得到对应的pad（其中CTR为内存的counter和地址），然后对之前得到的$\Sigma$做异或运算，异或后的结果就是PMAC算法最终得到的MAC值。在PMAC的整个过程中，可以对分割好的M块数据同时进行AES加密，相较于CMAC, HMAC这类串行的MAC来说非常的高效，并且AES加密计算本身非常高效，所以PMAC被认为是一种高效的计算MAC函数。
 
 \section{启动阶段}
 在内存分布中，我们将内存分成了不可信的内存区域，安全的内存区域，子树节点区域以及MMT元素据据区域。其中只有MMT元数据区域需要在硬件启动的时候就被配置好，剩下的区域能够在之后被动态的分配。在安全启动中，通电之后，在硬件固件中的bootloader会首先被加载运行，首先bootloader会随机生成用于完整性检查的PMAC的两个密钥key1，key2
