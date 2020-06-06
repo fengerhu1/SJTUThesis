@@ -83,4 +83,20 @@ cache miss 数据要从内存中获取时候，cache会生成了一个内存访�
 包括内存的频率（1600、2400）；不同的内存种类（lddr4、lddr4、hmc），不同的内存核心数量，rank和bank的数量，输出引脚的数量等等。除了能够模拟多种内存的模型，还能够精确设置内存性能至关重要的时序参数，例如：Tck、Tras等等。表格 ~\ref{t:gem5-config}中列举了我们模拟中采用的硬件，同时在测试的时候，我们也尝试使用不同的硬件组合，来测试程序运行是的性能。
 
 \section{内存控制器}
-内存控制处在SoC上，连接着总线。一个内存控制器控制着一个DIMM，能够触发对内存条的读写指令；当同时存在多个DIMM并插有多个内存条时，就需要有SoC中有多个与之对应的内存控制器。
+内存控制处在SoC上，连接着总线。一个内存控制器控制着一个DIMM，能够触发对内存条的读写指令；当同时存在多个DIMM并插有多个内存条时，就需要有SoC中有多个与之对应的内存控制器。为了使内存控制器能够实现MMT的功能，我们在原始的gem5内存控制器上进行了进一步的修改，增加了内存控制器中的三个组件：Secure Bitmap；Mount Table；Root-of-root，另外我们还针对子树和根数节点设计了缓存结构（Tree Node Cache），能够进一步换件完整性检查时候访问内存的开销。
+最对Secure Bitmap，我们在内存控制初始化的时候分配了16K的内存，其中每一个bit代表一颗子树是否被分配，初始化的时候我们将Secure Bitmap全部清零。在初始化阶段，我们还要分配Mount Table和Tree Node Cache的内存。其中Mount Table为四个集合，每一个集合中有两路缓存行，一个Mount Table 缓存行中可以存放4个子树的节点，Mount Table的大小为512B能够存储32颗子树。每一个Mount Tablew的缓存行组织结构如下~\ref{fig:Mount-Table-Set.png}所示：
+
+\begin{figure}[!htp]
+    \centering
+    \includegraphics[scale=0.5]{Mount-Table-Set.png}
+    \caption{\textbf{Mount-Table-Set }Mount Table缓存行中的数据结构}
+   \label{fig:Mount-Table-Set.png}
+\end{figure}
+Mount Table Set中一个缓存行由四个部分组成，分别是lru bit，valid bit，tag，以及子树的根节点信息。其中lru bit记录了当前的缓存行最近是否被访问过，如果被访问锅则lru bit被设置为1，如果没有被访问过，则lru bit被设置为0.如果lru bit为0表示当前的缓存行能够被驱逐出去。valid bit表示当前的缓存是否有效，如果为1表示当前的缓存中的数据是有效的，可以被内存控制器之间读取。tag是用于区分相同缓存集合中不同的缓存行，只有tag匹配一直且valid bit为1才被人为是缓存命中。
+一个缓存行中存储了四个子树的节点，其中每个子树根节点的大小为16B，包括了子树的counter以及地址。
+
+在gem5的内存控制器中，通过$recvTimingReq(PacketPtr pkt)$接受来自cache的数据包，通过$port.schedTimingResp(pkt, response_time)$将读取的数据返还给cache。当内存控制器接受到数据包的时候，首先会检查对应内存是否需要完整性保护$checkSecureBItmap$，如果访问的内存不需要完整性保护则调用$recvTimingReqNonSecure(pkt)$，如果需要完整性保护则回去Mount Table中寻找对应的子树根节点，如果子树的根节点不在Mount Table中那么，会去MMT元素局区域获取
+子树的根节点$acquireSubTreeNode(pkt)$，并且将从Mount Table中淘汰的子树的节点更新到MMT元数据区域中，同时更新Root-of-root的数值。当子树的根节点在Mount Table中，内存控制器能够进行之后的完整性检查。首先内存控制器会检查该数据包包含的内存访问是读请求还是写请求：$pkt->isWrite()$，$pkt->isWrite()$，如果是读请求，则将数据包放入内存控制器中的读缓存队列中，如果是写请求，则将数据包放入写缓存队列中。当数据包在读缓存队列中的时候，回去检查之前的
+写缓存队列中是否存在相同内存地址的写请求，如果存在，那么可以直接将写请求中的数据放入读请求的数据包中，返回给cache。如果读请求的数据包对应的内存地址不在写缓存队列中，那么将会发起一次内存的读操作。为了保证内存中数据的完整性，我们还需要读取对应内存的子树中的节点。我们首先会去保存子树的节点的缓存中检查对应的子树节点是否在Tree Node Cache中，如果在Tree Node Cache中那么可以直接读取到对应的子树节点中的counter和hash（会根据子树的层数以及内存的地址计算对应的counter在子树节点中的offset），
+如果不在Treee Node Cache中，则需要额外做一次内存的访存请求。所有的内存读写请求都会生成一次事件，加入到事件的调度其中。当读写内存请求的事件被调度到时，内存控制器会调用$processRespondEvent()$处理从内存中读到的数据。首先内存控制器会区分读取的数据是子树节点中的数据还是原本内存请求中的数据。当所有的子树节点中都在内存控制器中可读到时候（要么在Tree Node Cache中，要么从内存中读取出来），内存控制器会进行根据子树的节点对内存中的数据做完整性检查。
+如果完整性检查成果，则内存中的数据写到数据包中，调用$port.schedTimingResp(pkt, response_time)$，将结果返回给cache。对于数据包中的请求是写请求的话，将数据包加入写缓存队列，并将写内存事件加入事件调度器中，内存控制器会去更新对应子树中counter值，然后通知cache，内存写请求更新完成。因为一旦数据包静茹了写队列，之后的读求情都会先在写队列中寻找是否存在对应的数据，写队列的中的数据包也会异步的刷到内存中。

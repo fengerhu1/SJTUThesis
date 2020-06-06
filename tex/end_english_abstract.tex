@@ -1,46 +1,65 @@
 % !TEX root = ../thesis.tex
 
 \begin{bigabstract}
-  An imperial edict issued in 1896 by Emperor Guangxu, established Nanyang
-  Public School in Shanghai. The normal school, school of foreign studies,
-  middle school and a high school were established. Sheng Xuanhuai, the person
-  responsible for proposing the idea to the emperor, became the first president
-  and is regarded as the founder of the university.
+  In this paper, we proposes a new integrity tree organization, Mountable Merkle Tree (MMT). MMT promises a stable tree depth which will not increase with total memory size, and minimize the memory overheads by storing integrity metadata 
+  (hashes and counters) on demand. We leverages MMT for the scalable memory integrity protection.
 
-  During the 1930s, the university gained a reputation of nurturing top
-  engineers. After the foundation of People's Republic, some faculties were
-  transferred to other universities. A significant amount of its faculty were
-  sent in 1956, by the national government, to Xi'an to help build up Xi'an Jiao
-  Tong University in western China. Afterwards, the school was officially
-  renamed Shanghai Jiao Tong University.
+  Traditional integrity trees use a single tree to manage the hashes and counters for all data. That means the size (or depth) will increase along with the secure memory size, e.g., protecting 512GB memory in SGX needs an 11 depth integrity tree. Instead, 
+  MMT introduces a new concept, hash forest which includes a set of integrity trees protecting different memory regions. We call a single tree in the forest as SubTree. Each SubTree protects a fixed size memory region, e.g., 4MB in our design.
 
-  Since the reform and opening up policy in China, SJTU has taken the lead in
-  management reform of institutions for higher education, regaining its vigor
-  and vitality with an unprecedented momentum of growth. SJTU includes five
-  beautiful campuses, Xuhui, Minhang, Luwan Qibao, and Fahua, taking up an area
-  of about 3,225,833 m2. A number of disciplines have been advancing towards the
-  top echelon internationally, and a batch of burgeoning branches of learning
-  have taken an important position domestically.
+  With the limited space in the SoC, MMT puts all the SubTrees in the memory. MMT uses a RootTree to protect the integrity of all in-memory SubTrees.
+  The common root ancestor of RootTree is fixed in the SoC (i.e., the Root-root) to prevent attacks. The RootTree can dynamically add or remove a
+  SubTree from the hash forest. The mounted SubTrees represent the hot set of memory, which can boost integrity checking performance. When memory augments, MMT need not increase the SubTree depth but add more SubTrees in the forest. For each secure memory accesses, MMT will first check
+  whether the SubTree of accessed address is mounted. If it is, MMT checks the integrity using the in-SoC SubTree like traditional approaches. Otherwise MMT uses a mounting mechanism to mount the target SubTree into the SoC.
 
-  Today SJTU has 31 schools (departments), 63 undergraduate programs, 250
-  masters-degree programs, 203 Ph.D. programs, 28 post-doctorate programs, and
-  11 state key laboratories and national engineering research centers.
+  \textbf{Mounting.} The storage space for mounting SubTrees root in
+  the SoC is restricted, e.g., MMT allows 32 subtrees simultaneously. When space is exhausted, MMT unmounts the
+  inactive SubTree root out of the SoC and stores it in memory,
+  which is isolated with host memory in DRAM. Meanwhile,
+  MMT needs to update the value of the ancestors if necessary.
+  With the conception of the hash forest, MMT can realize on-demand memory integrity protection, and support the
+  integrity protection of discrete physical memory.
 
-  SJTU boasts a large number of famous scientists and professors, including 35
-  academics of the Academy of Sciences and Academy of Engineering, 95 accredited
-  professors and chair professors of the "Cheung Kong Scholars Program" and more
-  than 2,000 professors and associate professors.
+  \textbf{Integrity checking.} MMT will always enable integrity
+  protection when executing in the monitor (i.e., when executing in machine mode). As an enclave can access both
+  secure and non-secure memory (untrusted sharing memory),
+  we can not just impose integrity protection on all its pages.
+  In addition, protecting all enclaves is not suitable as some
+  enclaves do not care about integrity protection and prefer
+  better performance. MMT introduces two kinds of
+  registers, mode status register (Reg\_MS) and hole registers
+  (Reg\_hole\_VA\_start and Reg\_hole\_VA\_size) to resolve the
+  issues. Reg\_MS represents whether the current CPU needs integrity protection, so the monitor can meet different integrity
+  needs for distinct enclaves by controlling Reg\_MS. The hardware will apply integrity protection to all pages current CPU
+  uses when $MS== 1$ (i.e., executing enclave) and disable it
+  when $MS== 0$ in general. Hole registers are used to represent
+  a special virtual memory region that the integrity checking
+  is enabled when $MS== 0$ or disabled when $MS== 1$, e.g.,
+  enclave can share the untrusted memory with host in the hole
+  region that won't need integrity protection.
 
-  Its total enrollment of students amounts to 35,929, of which 1,564 are
-  international students. There are 16,802 undergraduates, and 17,563 masters
-  and Ph.D. candidates. After more than a century of operation, Jiao Tong
-  University has inherited the old tradition of "high starting points, solid
-  foundation, strict requirements and extensive practice." Students from SJTU
-  have won top prizes in various competitions, including ACM International
-  Collegiate Programming Contest, International Mathematical Contest in Modeling
-  and Electronics Design Contests. Famous alumni include Jiang Zemin, Lu Dingyi,
-  Ding Guangen, Wang Daohan, Qian Xuesen, Wu Wenjun, Zou Taofen, Mao Yisheng,
-  Cai Er, Huang Yanpei, Shao Lizi, Wang An and many more. More than 200 of the
-  academics of the Chinese Academy of Sciences and Chinese Academy of
-  Engineering are alumni of Jiao Tong University.
+  \textbf{Bootstrap.} In the hardware extension of
+  MMT. Besides the untrusted normal memory, there are three
+  regions, secure memory (enclaves and monitors), SubTree
+  nodes, and MMT meta-zone. Only the MMT meta-zone is a
+  fixed region configured by hardware bootrom, and the size of
+  the MMT meta-zone is 2.14MB (supports 512GB memory).
+  During system boot, the bootrom will initialize the MMT
+  meta-zone and allocate the subtree nodes for the monitor
+  memory. Then the monitor is loaded with integrity protection
+  and now takes the responsibility to manage integrity.
+
+  \textbf{SubTree allocation.} Not all physical memory needs integrity
+  protection (e.g., kernel memory), so it will not allocate all
+  SubTree nodes at the bootstrap. However, the monitor needs
+  to allocate memory for the subtree nodes when new memory
+  regions are changed to secure memory and sets the SubTree
+  root and address in the MMT meta-zone. As MMT meta-zone
+  can only be accessed by monitor, no others can tamper the
+  SubTree allocation.
+
+  We evaluate the MMT, SIT, VAULT on SPECCPU and STREAM benchmarks. The test results indicate that the page swap mechanism adopted in the SGX will bring serious performance overhead. Page swapping can occupy the 40\% proportion runtime in most benchmark cases, and may lead to 7 \sim 8 times performance overhead in the extreme case. We propose the MMt to mitigate the page swapping overhead with the dynamic primitives for integrity tree: Mount and Unmount. Mount and unmount only take 200 hundreds to fetch the subtree root and address from the MMT metadata zone and mount it in the Mount table in memory controller. The preliminary tests running on SPECCPU demonstrate that the extra overhead for mount and unmount operation is less than one percent, which is negligible in the most case. Comparing with SIT and VAULT, MMT demonstrates 2 to 3 times speed up, and the dominating overhead is integrity checking, fetching the tree node and computing the hash or mac for each  node and original data. We adopt the three level counter structure in each subtree node, which promotes the fan out up to 32. The depth of subtree is limited to 3, which can protect 4M memory. If SIT wants to protect the same size of memory, it need 5 levels of tree nodes. With the benefit of MMT tree node structure, we can further mitigate the runtime overhead for memory integrity protection. 
+
+In our prototype, MMT can protect up to 512G memory with 3-level subtree structure, which is more capable than SIT that can only protect 128M memory. All the tree node data and mac can be dynamically allocated later, the only fixed zone in the memory space when machine startup is MMT metadata zone, which is only about 2M. The memory overhead and runtime overhead is acceptable to support scalable memory integrity protection. 
+
 \end{bigabstract}
