@@ -1,8 +1,8 @@
 \chapter{测试与评估}
 
 \section{Benchmark测试}
-下面我们将实现的MMT内存完整性保护原型，在SPECCPU和STREAM的测试集上进行测试。SPECCPU是一个标准的cpu，内存和io的综合测试，它选取了多个一个典型的应用场景，能够较好的反应机器的综合性能。STREAM是一个测试内存性能的测试集，有较大的内存压力，能够评估内存在极限情况的下的性能。
-我们对比了不做任何完整性保护，使用SIT对内存进行完整性保护，使用vault对内存进行完整保护和使用MMT对内存进行完整性保护，在不同的测试集下的性能，同时页分析了页交换和Mount操作占总运行时间的比例，下面我们将具体的介绍每一个测试的结果。
+下面我们将实现的MMT内存完整性保护原型，在SPECCPU和STREAM的测试集上进行测试。SPECCPU是一个标准的cpu，内存和io的综合测试集，它选取了多个一个典型的应用场景，能够较好的反应机器的综合性能。STREAM是一个测试内存性能的测试集，有较大的内存压力，能够评估内存在极限情况的下的性能。
+我们对比了不做任何完整性保护，使用SIT对内存进行完整性保护，使用vault对内存进行完整保护和使用MMT对内存进行完整性保护，在不同的测试集下的性能，同时也分析了页交换和挂载操作占总运行时间的比例，下面我们将具体的介绍每一个测试的结果。
 
 \begin{figure}[!htp]
     \centering
@@ -10,11 +10,52 @@
     \caption{\textbf{SPECCPU, STREAM测试集在不同完整性保护方案下swap所占比列}。}
    \label{fig:eval-swap}
 \end{figure}
+
+
+
+%   \begin{figure}[!htp]
+%     \centering
+%     \begin{subfigure}
+%       \centering
+%       \includegraphics[scale=0.5]{GemsFDTD.png}
+%       \caption{GemsFDTD内存访问}
+%     \end{subfigure}
+%     \hspace{1cm}
+%     \begin{subfigure}
+%       \centering
+%       \includegraphics[scale=0.5]{zeusmp.png}
+%       \caption{GemsFDTD内存访问}
+%     \end{subfigure}
+%     \caption{\textbf{SPECCPU中测试集的内存追踪}。}
+%     \label{fig:subfigure}
+%   \end{figure}
+
+% \begin{figure}[!htp]
+%     %  \setlength{\abovecaptionskip}{-5pt}
+%       \centering
+%       \includegraphics[scale=1]{fig/design-hw-mountable-tree.eps}
+%       \caption{\textbf{哈希森林}}
+%       \label{fig:hash-forest}
+%     \end{figure}
+
 如图 ~\ref{fig:eval-swap}所示，我们分别测试了SIT，VAULT等先进的完整性保护方案，在超过soc上保护内存限制时候产生swap的开销占总运行时间的比例。为了能够理论上支持无限制的内存完整性保护方案，在SIT以及VAULT等方案中一旦使用的内存超过了soc可以保护的范围。CPU会选择恰当
-页将其中改的数据进行加密，然后swap到非安全的内存中。为了保证从非安全内存中swap回到安全内存中，数据没有被修改。CPU在swap的时候会生成一个evict metatdate结构。该结构中记录了swap出去页的哈希值，以及属于哪一个enclave等相关的元数据，该结构被存储在安全内存中。注意当安全内存
+页将其中的数据进行加密，然后swap到非安全的内存中。为了保证从非安全内存中swap回到安全内存中，数据没有被修改，CPU在swap的时候会生成一个evict metatdate结构。该结构中记录了swap出去页的哈希值，以及属于哪一个enclave等相关的元数据，该结构被存储在安全内存中。注意当安全内存
 十分紧张的时候，该数据结构也可能被swap到非安全内存中，同样我们会为存放evict metadata的页生成一个evict metadata，类似于树的形式，只需要保存根上的evict metadata既可以保证所有swap出去页的完整性。虽然SIT，vault能够理论上支持更多的内存，但是当SoC上保护得内存耗尽的时候
-swap会带来很严重的性能开销，测试发现，一次swap将会带来高达40k的开销，我们在SPECCPU和STREAM测试集上进行了测试（这里我们挑选了SPECCPU中运行时内存超过128M的测试用例），我们发现swap占据了总运行时间的10\%-80\%，其中5/6的测试结果显示swap占据了总运行时间的40\%以上，其中GemsFDTD和STREAM测试swap的开销格外严重，占据了总运行时间的80\%以上，
-另外杜比SIT和VAULT，在VAULT中swap的开销会更加的严重，这不是应为VAULT的设计的缺陷，还是因为VAULT运行时候的气态开销更小，导致了swap所占的时间更加明显。通过上面的数据显示，一旦使用的内存超过了SoC上保护的限制，swap将造成验证的性能降级，所以优化swap的开销非常的重要。
+swap会带来很严重的性能开销，测试发现，一次swap将会带来高达40k时钟周期的开销，我们在SPECCPU和STREAM测试集上进行了测试（这里我们挑选了SPECCPU中运行时内存超过128M的测试用例），我们发现swap占据了总运行时间的10\%\sim 80\%，5/6的测试结果显示swap占据了总运行时间的40\%以上，其中GemsFDTD和STREAM测试swap的开销格外严重，占据了总运行时间的80\%以上，
+另外对比SIT和VAULT，在VAULT中swap的开销会更加的严重，这不是应为VAULT的设计的缺陷，还是因为VAULT运行时候的其他开销更小，导致了swap所占的时间更加明显。通过上面的数据显示，一旦使用的内存超过了SoC上保护的限制，swap将造成严重的性能降级，所以优化swap的开销非常的重要。
+
+\begin{figure}[!hbtp]
+    \centering
+    \subcaptionbox{GemsFDTD内存访问}%
+                    {\includegraphics[scale=0.5]{GemsFDTD.png}}
+    \hspace{1cm}
+    \subcaptionbox{zeusmp内存访问}%
+                    {\includegraphics[scale=0.5]{zeusmp.png}}
+    \caption{\textbf{SPECCPU中测试集的内存追踪}。}
+    \label{fig:bisubcaptionbox}
+  \end{figure}
+如图~\ref{fig:bisubcaptionbox}所示，我们选择了swap开销最大和最小的两个测试集作比较。在GemsFDTD测试集中，程序顺序遍历所有的内存，不具备很好的了局域性，每一次加载新的页都可能替换安全内存中的一个页，导致了频繁的swap操作。但是对于MMT来说，我们采用了挂载子树的操作，因为子树的保护范围更大，相当于预先加载了之后需要使用的内存到SoC中，并且顺序遍历的内存不存在频繁的
+挂载和卸载子树的操作，因此MMT的性能开销小于1\%。对于zeusmp，程序拥有较好了局域性，之前在安全内存中的页会被反复使用，不会产生频繁的swap机制，因此swap的开销较小。但是与MMT相比，挂载子树的开销更好，挂载的机制也能够充分利用程序内存访问的局域性，带来显著的性能提升
 
 \begin{figure}[!htp]
     \centering
@@ -23,10 +64,10 @@ swap会带来很严重的性能开销，测试发现，一次swap将会带来高
    \label{fig:eval-rehash}
 \end{figure}
 如图 ~\ref{fig:eval-rehash}所示，我们测试了VAULT和MMT中rehash的次数。为了能够增加完整性保护树中节点的扇出，VAULT和MMT都采用了分级counter的设计思路。因为分级counter会带来rehash的额外开销，来缓解replay等攻击。在MMT的设计中我们采用了三级counter的设计，三级counter的设计充分考虑了
-完整性保护树中的冷热counter不均衡，在较高的树节点中往往只存在一个活跃的counter，而其他的counter可能处于不活跃的状态，所以我们可以减少冷counter比特数，增加热counter的比特数，从而兼顾安全性于节点的扇出。在这里我们同先进的VAULT完整性保护方案进行了比较。其中VAULT的稳定扇出为24，而MMT中
-节点的扇出为32。在更大的扇出情况下，MMT并没造成更多的rehash的次数，说明在真实的workload下，完整性保护树中的冷热counter分布不均衡，而extra counter的设计能够很好的考虑到这种情况，从而进一步的提高树节点的扇出。在SPECCPU的测试集中，大多数的场景下，MMT于VAULT的rehash的次数相差小于1\%，
-在stream的场景中，因为内存访问的比较规律，同时使用的内存较少，通过extra conter的方式能够使热counter拥有更多的比特数，从而减少热counter rehash带来的影响。所以相较于VAULT而言rehash的次数反而更少了。综上，我们认为MMT三层counter的设计充分考虑了完整性保护树的不均衡性，在实际场景中不会带来更多的
-开销，在个别场景中，会比先经的VAULT的rehash开销更少。
+完整性保护树中的冷热counter不均衡情况，在较高的树节点中往往只存在一个活跃的counter，而其他的counter可能处于不活跃的状态，所以我们可以减少冷counter比特数，增加热counter的比特数，从而兼顾安全性与节点的扇出。在这里我们同先进的VAULT完整性保护方案进行了比较，其中VAULT的稳定扇出为24，而MMT中
+节点的扇出为32。在更大的扇出情况下，MMT并没造成更多的rehash的次数，说明在真实的工作负载下，完整性保护树中的冷热counter分布不均衡，而extra counter的设计能够很好的考虑到这种情况，从而进一步的提高树节点的扇出。在SPECCPU的测试集中，大多数的场景下，MMT与VAULT的rehash的次数相差小于1\%，
+在stream的场景中，因为内存访问的比较规律，同时使用的内存较少，通过extra conter的方式能够使热counter拥有更多的比特数，从而减少热counter rehash带来的影响，所以相较于VAULT而言rehash的次数反而更少了。综上，我们认为MMT三层counter的设计充分考虑了完整性保护树的不均衡性，在实际场景中不会带来更多的
+rehash开销；相反在个别场景中，rehash的开销反而会比在VAULT中更小。
 
 \begin{figure}[!htp]
     \centering
@@ -34,9 +75,9 @@ swap会带来很严重的性能开销，测试发现，一次swap将会带来高
     \caption{\textbf{STREAM测试集使用内存大小与不同完整性保护方案下性能关系图}。}
    \label{fig:eval-memorysize}
 \end{figure}
-如图 ~\ref{fig:eval-memorysize}所示，我们比较程序使用不同的内存大小，对完整性检查的影响，在这里我们选取了STREAM测试集。STREAM是为了测试内存的性能的测试集，拥有较大的内存压力，频繁的读写内存能够快速耗尽SoC上能保护得安全内存得空间，同时产生频繁得swap操作。这里我们分别选取了SIT, VAULT, MMT对使用40M, 80M, 160M内存
-得STREAM测试集做了分析。当程序使用的内存少于SoC上能够保护得内存时候，SIT，VAULT，MMT之间得差距并不是很明显。SIT会比MMT慢20\%左右，和VAULT相比，MMT采用了三级counter得设计，与VAULT相相比略有性能提升。因为40M和80M得内存较少，没有充分发挥三级counter得优势，当进一步扩大内存得时候三级counter得优势会更加的明显。
-当使用的程序使用的内存超过了128M得时候。SIT和VAULT得性能开销急剧增加，因为STREAM会频繁循环的的访问内存，所以一旦超出了SoC上能够保护的内存时，就会频繁的发生swap操作，造成较大的性能开销。和SIT，VAULT相反，MMT采用了挂挂载的方式代替内存的swap，挂载操作的开销非常小（100~200 cycles）。所以当使用的内存扩大了一倍，
+如图 ~\ref{fig:eval-memorysize}所示，我们比较程序使用不同的内存大小，对完整性检查的影响，在这里我们选取了STREAM测试集。STREAM是为了测试内存的性能的测试集，拥有较大的内存压力，频繁的读写内存能够快速耗尽SoC上能保护的安全内存的空间，同时产生频繁得swap操作。这里我们分别选取了SIT, VAULT, MMT对使用40M, 80M, 160M内存
+的STREAM测试集做了分析。当程序使用的内存少于SoC上能够保护得内存时候，SIT，VAULT，MMT之间得差距并不是很明显。SIT会比MMT慢20\%左右，和VAULT相比，MMT采用了三级counter的设计，性能略有提升。因为40M和80M得内存较少，没有充分发挥三级counter得优势，当进一步扩大内存的时候三级counter的优势会更加的明显。
+当程序使用的内存超过了128M的时候。SIT和VAULT得性能开销急剧增加，因为STREAM会频繁循环的地访问内存，所以一旦超出了SoC上能够保护的内存时，就会频繁的发生swap操作，造成较大的性能开销。和SIT，VAULT相反，MMT采用了挂载的方式代替内存的swap，挂载操作的开销非常小（100~200 cycles）。所以当使用的内存扩大了一倍，
 运行时间也线性的扩大了一倍，挂载操作并没有成为性能的瓶颈。而swap操作会带来7，8倍的性能开销，说明swap操作取代了完整性保护的检查，成为了主要的瓶颈。
 
 \begin{figure}[hbt]
